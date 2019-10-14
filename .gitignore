@@ -90,3 +90,10 @@ ENV/
 
 requirements.in
 mypythonfile.py
+
+#pycharm
+.DS_Store
+.idea*
+
+# data
+data/*.sqlite
