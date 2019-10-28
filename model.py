@@ -7,7 +7,6 @@ import pyro
 import pyro.distributions as dist
 import torch
 from torch.distributions import constraints
-from functools import partial
 
 
 def feature_generation(data):
@@ -42,75 +41,78 @@ def feature_generation(data):
     return data, feature_info
 
 
-def model(data, demand):
-    coef = {}
-    for s in features['station']['names']:
-        coef[s] = pyro.sample(s, dist.Normal(0, 1))
+class PoissReg:
 
-    for s in features['hour']['names']:
-        coef[s] = pyro.sample(s, dist.Normal(0, 1))
+    def __init__(self, features, data):
 
-    log_lmbda = 0
-    for i in range(len(features['station']['names'])):
-        name = features['station']['names'][i]
-        index = features['station']['index'][i]
-        log_lmbda += coef[name] * data[:, index]
+        self.features = features
 
-    for i in range(len(features['hour']['names'])):
-        name = features['hour']['names'][i]
-        index = features['hour']['index'][i]
-        log_lmbda += coef[name] * data[:, index]
+    def model(self, data, demand):
+        coef = {}
 
-    lmbda = log_lmbda.exp()
+        for s in self.features['station']['names']:
+            coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
-    with pyro.plate("data", len(data)):
-        y = pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
+        for s in self.features['hour']['names']:
+            coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
-        # should we be returning lmbda?
-        return y
+        log_lmbda = 0
+        for i in range(len(self.features['station']['names'])):
+            name = self.features['station']['names'][i]
+            index = self.features['station']['index'][i]
+            log_lmbda += coef[name] * data[:, index]
 
+        for i in range(len(self.features['hour']['names'])):
+            name = self.features['hour']['names'][i]
+            index = self.features['hour']['index'][i]
+            log_lmbda += coef[name] * data[:, index]
 
-def guide(data, demand):
-    weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
-    weights_scale = pyro.param('weights_scale', torch.ones(data.shape[1]),
-                               constraint=constraints.positive)
+        lmbda = log_lmbda.exp()
 
-    coef = {}
-    log_lmbda = 0
-    for i in range(len(features['station']['names'])):
-        name = features['station']['names'][i]
-        index = features['station']['index'][i]
+        with pyro.plate("data", len(data)):
+            y = pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
 
-        coef[name] = pyro.sample(
-            name,
-            dist.Normal(
-                weights_loc[index],
-                weights_scale[index]))
-        log_lmbda += coef[name] * data[:, index]
+            # should we be returning lmbda?
+            return lmbda
 
-    lmbda = log_lmbda.exp()
+    def guide(self, data, demand):
+        weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
+        weights_scale = pyro.param('weights_scale', torch.ones(data.shape[1]),
+                                   constraint=constraints.positive)
 
+        coef = {}
+        log_lmbda = 0
+        for i in range(len(self.features['station']['names'])):
+            name = self.features['station']['names'][i]
+            index = self.features['station']['index'][i]
 
-def wrapped_model(data, demand):
-    # This shouldn't be delta in this case like https://pyro.ai/examples/bayesian_regression.html#Inference
-    # pyro.sample("prediction", dist.Delta(model(data, demand)))
-    # We want a poisson output
-    pyro.sample("prediction", dist.Poisson(model(data, demand)))
+            coef[name] = pyro.sample(name,
+                                     dist.Normal(weights_loc[index],
+                                                 weights_scale[index]))
+
+            log_lmbda += coef[name] * data[:, index]
+
+        for i in range(len(self.features['hour']['names'])):
+            name = self.features['hour']['names'][i]
+            index = self.features['hour']['index'][i]
+
+            coef[name] = pyro.sample(name,
+                                     dist.Normal(weights_loc[index],
+                                                 weights_scale[index]))
+
+            log_lmbda += coef[name] * data[:, index]
+
+        lmbda = log_lmbda.exp()
+
+    def wrapped_model(self, data, demand):
+        # This shouldn't be delta in this case like https://pyro.ai/examples/bayesian_regression.html#Inference
+        # pyro.sample("prediction", dist.Delta(model(data, demand)))
+        # We want a poisson output
+        pyro.sample("prediction", dist.Poisson(self.model(data, demand)))
 
 
 if __name__ == '__main__':
-
-    import pickle
-    from pyro.infer import EmpiricalMarginal, SVI, JitTrace_ELBO, TracePredictive
-    import pyro.optim as optim
-    logging.basicConfig(format='%(message)s', level=logging.INFO)
-    # Enable validation checks
-    pyro.enable_validation(True)
-    smoke_test = ('CI' in os.environ)
-    pyro.set_rng_seed(1)
-    pd.options.display.max_rows = 100
-    pd.options.display.max_columns = 100
-
+    pass
     # with open('data/demand.pickle', 'rb') as f:
     #     data1 = pickle.load(f)
     #
@@ -118,69 +120,3 @@ if __name__ == '__main__':
     # with open('data/demand_sample.pickle','wb') as f:
     #     pickle.dump(samp, f)
 
-    with open('data/demand_sample.pickle', 'rb') as f:
-        data_samp = pickle.load(f)
-
-    data, features = feature_generation(data_samp)
-
-    pyro.clear_param_store()
-    svi = SVI(model,
-              guide,
-              optim.Adam({"lr": .005}),
-              loss=JitTrace_ELBO(),
-              num_samples=1000)
-
-    num_iters = 3000 if not smoke_test else 2
-    for i in range(num_iters):
-        elbo = svi.step(data['data'], data['demand'])
-        if i % 500 == 0:
-            logging.info("Elbo loss: {}".format(elbo))
-
-    # Posterior
-    svi_posterior = svi.run(data['data'], data['demand'])
-    # Posterior predictive
-    trace_pred = TracePredictive(wrapped_model,
-                                 svi_posterior,
-                                 num_samples=100)
-    post_pred = trace_pred.run(data['data'], None)
-
-    def get_marginal(traces, sites): return EmpiricalMarginal(
-        traces, sites)._get_samples_and_weights()[0].detach().cpu().numpy()
-
-    # What is marginal in this case?
-    marginal = get_marginal(post_pred, ['obs', 'prediction'])
-
-    def summary(traces, sites):
-        marginal = get_marginal(traces, sites)
-        site_stats = {}
-        for i in range(marginal.shape[1]):
-            site_name = sites[i]
-            marginal_site = pd.DataFrame(marginal[:, i]).transpose()
-            describe = partial(pd.Series.describe,
-                               percentiles=[.05, 0.25, 0.5, 0.75, 0.95])
-            site_stats[site_name] = marginal_site.apply(
-                describe, axis=1)[["mean", "std", "5%", "25%", "50%", "75%", "95%"]]
-        return site_stats
-
-    post_summary = summary(post_pred, sites=['prediction', 'obs'])
-
-    pyro.get_param_store().save('models/svi_params.pkl')
-    pyro.clear_param_store()
-    pyro.get_param_store().load('models/svi_params.pkl')
-
-    # Replay (https://forum.pyro.ai/t/tracepredictive-worse-than-sampling-guides/715/2)
-    # preds = []
-    # for _ in range(1000):
-    #     guide_trace = guide(data['data'], None)
-    #     preds.append(pyro.poutine.replay(model, guide_trace)(data['data'], None))
-
-    # MCMC example
-    # https://github.com/pyro-ppl/pyro/blob/dev/examples/baseball.py
-
-    from pyro.infer.mcmc.api import MCMC
-    from pyro.infer.mcmc import NUTS
-
-    nuts_kernel = NUTS(model)
-
-    mcmc = MCMC(nuts_kernel, num_samples=1000, warmup_steps=200)
-    mcmc_run = mcmc.run(features['stations'], features['demand'])
