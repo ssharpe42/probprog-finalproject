@@ -1,6 +1,7 @@
 # Some code taken from
 # http://pyro.ai/examples/bayesian_regression.html#Model-Evaluation
 
+import numpy as np
 import pandas as pd
 from functools import partial
 import pyro
@@ -83,3 +84,49 @@ def plot_elbo(elbo_losses):
                  y=elbo_losses,
                  ax=ax)
 
+
+def compare_test_statistic(actual, predictive, stat=None, **kwargs):
+    """
+
+    :param actual: numpy array of actual data
+    :param predictive: numpy array of predictive distribution
+                        expected shape (n samples, 1, data size)
+    :param stat: test statistic function
+    :param kwargs: extra arguments in test stat function
+    :return: plot of comparison
+    """
+
+    actual_stat = stat(actual, **kwargs)
+    pred_stat = stat(predictive, **kwargs)
+
+    sns.distplot(pred_stat, kde = False)
+    plt.axvline(actual_stat, 0,  pred_stat.max(), color = 'red')
+
+
+# Test statistics over n samples of a distribution
+
+def perc_0(dist):
+
+    dist = dist.squeeze()
+
+    if len(dist.shape)==1:
+        return (dist==0).mean()
+    else:
+        return (dist ==0).mean(axis = 1)
+
+def max(dist):
+
+    dist = dist.squeeze()
+    if len(dist.shape)==1:
+        return dist.max()
+    else:
+        return dist.max(axis = 1)
+
+def percentile(dist, q = 99):
+
+    dist = dist.squeeze()
+
+    if len(dist.shape)==1:
+        return np.percentile(dist,q)
+    else:
+        return np.percentile(dist,q, axis = 1)

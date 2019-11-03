@@ -18,12 +18,15 @@ def get_demand(conn):
     trips['start_date'] = pd.to_datetime(trips['start_date'])
 
     # Convert to date and hour
+    # trips['date_hour'] = trips['start_date'].dt.floor('h')
+
+    # Convert to date and every 3 hour
     trips['date_hour'] = trips['start_date'].dt.floor('h')
 
     # Get all combinations of time and station
     date_hours, stations = cartesian_product([
         pd.date_range(trips['date_hour'].min(),
-                      trips['date_hour'].max(), freq='H'),
+                      trips['date_hour'].max(), freq='3h'),
         trips['start_station_id'].unique()])
 
     all_periods = pd.DataFrame(
@@ -105,6 +108,8 @@ def get_censored_demand(conn):
         con=conn)
 
     censored_demand['date_hour'] = pd.to_datetime(censored_demand['date_hour'])
+    censored_demand['date_hour'] = censored_demand['date_hour'].dt.floor('3h')
+    censored_demand=censored_demand.drop_duplicates('date_hour')
     censored_demand['censored'] = 1
 
     return censored_demand
@@ -144,5 +149,5 @@ if __name__ == '__main__':
     if not os.path.exists('data'):
         os.mkdir('data')
 
-    with open('data/demand.pickle', 'wb') as f:
+    with open('data/demand_3h.pickle', 'wb') as f:
         pickle.dump(demand, f)

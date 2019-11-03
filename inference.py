@@ -11,8 +11,6 @@ logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 
 
-
-
 def run_svi(model, guide, iters, data, demand, num_samples = 100, filename = ''):
 
     pyro.clear_param_store()
@@ -52,9 +50,12 @@ def get_svi_posterior(data, demand, svi = None, model = None,
                   loss=JitTrace_ELBO(),
                   num_samples=num_samples)
 
-        return svi.run(data, demand)
+        svi.run(data, demand)
+
+        return svi
     elif svi:
-        return svi.run(data, demand)
+        svi.run(data, demand)
+        return svi
     else:
         raise ValueError('Provide svi object or model/guide and filename')
 

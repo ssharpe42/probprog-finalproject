@@ -1,5 +1,4 @@
-import logging
-import os
+# Zero Inflated Poisson Regression
 
 import numpy as np
 import pandas as pd
@@ -40,8 +39,8 @@ def feature_generation(data):
 
     return data, feature_info
 
-# 2362.1897
-class PoissReg:
+
+class ZIPoissReg:
 
     def __init__(self, features, data):
 
@@ -69,16 +68,27 @@ class PoissReg:
 
         lmbda = log_lmbda.exp()
 
+        gate_alpha = pyro.sample('gate_alpha_prior', dist.Gamma(2, .6))
+        gate_beta = pyro.sample('gate_beta_prior', dist.Gamma(3, .4))
+        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
+
         with pyro.plate("data", len(data)):
-            y = pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
+            pyro.sample(
+                "obs", dist.ZeroInflatedPoisson(
+                    gate, lmbda), obs=demand)
 
             # should we be returning lmbda?
-            return lmbda
+            return gate, lmbda
 
     def guide(self, data, demand):
         weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
         weights_scale = pyro.param('weights_scale', torch.ones(data.shape[1]),
                                    constraint=constraints.positive)
+
+        gate_alpha = pyro.param('gate_alpha', torch.tensor(3.),
+                                constraint=constraints.positive)
+        gate_beta = pyro.param('gate_beta', torch.tensor(3.),
+                               constraint=constraints.positive)
 
         coef = {}
         log_lmbda = 0
@@ -103,21 +113,28 @@ class PoissReg:
             log_lmbda += coef[name] * data[:, index]
 
         lmbda = log_lmbda.exp()
+        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
 
     def wrapped_model(self, data, demand):
-        # This shouldn't be delta in this case like https://pyro.ai/examples/bayesian_regression.html#Inference
+        # This shouldn't be delta in this case like
+        # https://pyro.ai/examples/bayesian_regression.html#Inference
         # pyro.sample("prediction", dist.Delta(model(data, demand)))
         # We want a poisson output
-        pyro.sample("prediction", dist.Poisson(self.model(data, demand)))
+        pyro.sample(
+            "prediction",
+            dist.ZeroInflatedPoisson(
+                *
+                self.model(
+                    data,
+                    demand)))
 
 
 if __name__ == '__main__':
-    pass
-    # import pickle
-    # with open('data/demand_3h.pickle', 'rb') as f:
-    #     data1 = pickle.load(f)
-    #
-    # samp = data1.groupby(['start_station_id','hour']).apply(lambda x: x.sample(300)).reset_index(drop = True)
-    # with open('data/demand_sample.pickle','wb') as f:
-    #     pickle.dump(samp, f)
+    import pickle
+    with open('data/demand_3h.pickle', 'rb') as f:
+        data1 = pickle.load(f)
 
+    samp = data1.groupby(['start_station_id', 'hour']).apply(
+        lambda x: x.sample(100)).reset_index(drop=True)
+    with open('data/demand_sample.pickle', 'wb') as f:
+        pickle.dump(samp, f)
