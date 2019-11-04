@@ -74,6 +74,8 @@ class PoissReg:
 
             # should we be returning lmbda?
             return lmbda
+        
+                                          
 
     def guide(self, data, demand):
         weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
@@ -103,6 +105,7 @@ class PoissReg:
             log_lmbda += coef[name] * data[:, index]
 
         lmbda = log_lmbda.exp()
+        
 
     def wrapped_model(self, data, demand):
         # This shouldn't be delta in this case like https://pyro.ai/examples/bayesian_regression.html#Inference
