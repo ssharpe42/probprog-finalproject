@@ -1,8 +1,9 @@
+import os
+import pickle
+import sqlite3
+
 import pandas as pd
 from pandas.core.reshape.util import cartesian_product
-import sqlite3
-import pickle
-import os
 
 
 def get_demand(conn):
@@ -45,10 +46,10 @@ def get_demand(conn):
         trips.groupby(['start_station_id',
                        'start_station_name',
                        'date_hour'])
-        .size()
-        .reset_index(name='demand'),
+            .size()
+            .reset_index(name='demand'),
         how='left', on=['date_hour', 'start_station_id'])
-        .fillna(0))
+                    .fillna(0))
 
     # Add time features
     hourly_trips['month'] = hourly_trips['date_hour'].dt.month
@@ -109,31 +110,31 @@ def get_censored_demand(conn):
 
     censored_demand['date_hour'] = pd.to_datetime(censored_demand['date_hour'])
     censored_demand['date_hour'] = censored_demand['date_hour'].dt.floor('3h')
-    censored_demand=censored_demand.drop_duplicates('date_hour')
+    censored_demand = censored_demand.drop_duplicates('date_hour')
     censored_demand['censored'] = 1
 
     return censored_demand
 
 
 def create_model_obs(conn, weather=False):
-
     demand = get_demand(conn)
     censored = get_censored_demand(conn)
+    stations = get_station_info(conn)
 
-    model_data = demand.merge(censored,
-                              on=['start_station_id', 'date_hour'],
-                              how='left').fillna(0)
+    model_data = (demand.merge(censored,
+                               on=['start_station_id', 'date_hour'],
+                               how='left')
+                  .fillna(0)
+                  .merge(stations[['id', 'zip_code']],
+                         left_on='start_station_id',
+                         right_on='id'))
 
     if not weather:
         return model_data
     else:
-        stations = get_station_info(conn)
         weather = get_weather()
 
         model_data = (model_data
-                      .merge(stations[['id', 'zip_code']],
-                             left_on='start_station_id',
-                             right_on='id')
                       .merge(weather,
                              on=['zip_code', 'date'],
                              how='left'))

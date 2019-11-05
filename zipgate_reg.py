@@ -1,4 +1,5 @@
 # Zero Inflated Poisson Regression
+# Gate also estimated as regression
 
 import numpy as np
 import pandas as pd
@@ -6,6 +7,7 @@ import pyro
 import pyro.distributions as dist
 import torch
 from torch.distributions import constraints
+from torch.nn.functional import sigmoid
 
 
 def feature_generation(data):
@@ -40,7 +42,7 @@ def feature_generation(data):
     return data, feature_info
 
 
-class ZIPoissReg:
+class ZIPoissRegGate:
 
     def __init__(self, features, data):
 
@@ -52,14 +54,20 @@ class ZIPoissReg:
         for s in self.features['station']['names']:
             coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
+        for s in self.features['station']['names']:
+            s+='_gate'
+            coef[s] = pyro.sample(s, dist.Normal(0, 1))
+
         for s in self.features['hour']['names']:
             coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
         log_lmbda = 0
+        gate_mean = 0
         for i in range(len(self.features['station']['names'])):
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
             log_lmbda += coef[name] * data[:, index]
+            gate_mean += coef[name+'_gate'] * data[:, index]
 
         for i in range(len(self.features['hour']['names'])):
             name = self.features['hour']['names'][i]
@@ -67,17 +75,13 @@ class ZIPoissReg:
             log_lmbda += coef[name] * data[:, index]
 
         lmbda = log_lmbda.exp()
-
-        gate_alpha = pyro.sample('gate_alpha_prior', dist.Gamma(2, .6))
-        gate_beta = pyro.sample('gate_beta_prior', dist.Gamma(3, .4))
-        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
+        gate = sigmoid(gate_mean)
 
         with pyro.plate("data", len(data)):
             pyro.sample(
                 "obs", dist.ZeroInflatedPoisson(
                     gate, lmbda), obs=demand)
 
-            # should we be returning lmbda?
             return gate, lmbda
 
     def guide(self, data, demand):
@@ -87,18 +91,19 @@ class ZIPoissReg:
         station_w_scale = pyro.param('station_w_scale', torch.ones(n_stations),
                                    constraint=constraints.positive)
 
+        station_gate_loc = pyro.param('station_gate_loc', torch.randn(n_stations))
+        station_gate_scale = pyro.param('station_gate_scale', torch.ones(n_stations),
+                                   constraint=constraints.positive)
+
+
         n_hours = len(self.features['hour']['names'])
         hour_w_loc = pyro.param('hour_w_loc', torch.randn(n_hours))
         hour_w_scale = pyro.param('hour_w_scale', torch.ones(n_hours),
                                    constraint=constraints.positive)
 
-        gate_alpha = pyro.param('gate_alpha', torch.tensor(3.),
-                                constraint=constraints.positive)
-        gate_beta = pyro.param('gate_beta', torch.tensor(3.),
-                               constraint=constraints.positive)
-
         coef = {}
         log_lmbda = 0
+        gate_mean = 0
         for i in range(len(self.features['station']['names'])):
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
@@ -107,7 +112,12 @@ class ZIPoissReg:
                                      dist.Normal(station_w_loc[i],
                                                  station_w_scale[i]))
 
+            coef[name+'_gate'] = pyro.sample(name+'_gate',
+                                     dist.Normal(station_gate_loc[i],
+                                                 station_gate_scale[i]))
+
             log_lmbda += coef[name] * data[:, index]
+            gate_mean += coef[name+'_gate'] * data[:, index]
 
         for i in range(len(self.features['hour']['names'])):
             name = self.features['hour']['names'][i]
@@ -120,7 +130,7 @@ class ZIPoissReg:
             log_lmbda += coef[name] * data[:, index]
 
         lmbda = log_lmbda.exp()
-        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
+        gate = sigmoid(gate_mean)
 
     def wrapped_model(self, data, demand):
         # This shouldn't be delta in this case like

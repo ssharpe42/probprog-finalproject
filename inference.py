@@ -11,6 +11,10 @@ logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 
 
+def ewma_step(current, new, alpha = .9):
+
+    return current*(1-alpha) + new*alpha
+
 def run_svi(model, guide, iters, data, demand, num_samples = 100, filename = ''):
 
     pyro.clear_param_store()

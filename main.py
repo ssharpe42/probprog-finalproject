@@ -1,10 +1,12 @@
 import pickle
 
-#from model import *
-#from model2 import *
+from baseline import *
+#from pois_reg_sine import *
 from zipreg_model import *
+from zipgate_reg import *
 from inference import *
 from criticism import *
+from preprocess_bikeshare import *
 
 
 
@@ -14,11 +16,16 @@ def main():
     with open('data/demand_sample.pickle', 'rb') as f:
         data_samp = pickle.load(f)
 
+    # Split into train and test
+    train = data_samp.sample(frac=0.5, random_state=42)
+    test = data_samp.drop(train.index)
+
 
     #global features
-    data, features = feature_generation(data_samp)
-    #p = PoissReg(features, data)
-    p = ZIPoissReg(features, data)
+    data, features = feature_generation(train)
+    p = PoissReg(features, data)
+    #p = ZIPoissReg(features, data)
+    #p = ZIPoissRegGate(features, data)
 
     train_new = False
 
@@ -27,7 +34,7 @@ def main():
                                  iters=5000,
                                  data=data['data'],
                                  demand=data['demand'],
-                                 filename='models/svi_zip_params.pkl')
+                                 filename='models/svi_baseline_params.pkl')
 
         plot_elbo(elbo_loss)
 
@@ -40,7 +47,7 @@ def main():
         svi_posterior = get_svi_posterior(data['data'], data['demand'],
                                         model = p.model,
                                           guide = p.guide,
-                                          filename='models/svi_params.pkl')
+                                          filename='models/svi_zip_params.pkl')
 
     post_samples = posterior_samples(
         p.wrapped_model,
@@ -66,13 +73,16 @@ def main():
     #     num_samples=200)
 
     # Example test statistics
-    compare_test_statistic(data_samp.demand.values, post_samples[:,1,:],
+    compare_test_statistic(test.demand.values, post_samples[:,1,:],
                            stat=perc_0)
-    compare_test_statistic(data_samp.demand.values, post_samples[:, 1, :],
-                           stat=max)
-    compare_test_statistic(data_samp.demand.values, post_samples[:, 1, :],
+    compare_test_statistic(test.demand.values, post_samples[:, 1, :],
+                           stat=max_)
+    compare_test_statistic(test.demand.values, post_samples[:, 1, :],
                            stat=percentile, q=80)
 
+
+
+    station_info = get_station_info(conn =sqlite3.connect('data/sf_bikeshare.sqlite'))
 
     summary = site_summary(post_samples, ['obs','prediction'])
 

@@ -105,6 +105,14 @@ def compare_test_statistic(actual, predictive, stat=None, **kwargs):
 
 # Test statistics over n samples of a distribution
 
+def mean(dist):
+    dist = dist.squeeze()
+
+    if len(dist.shape) == 1:
+        return dist.mean()
+    else:
+        return dist.mean(axis=1)
+
 def perc_0(dist):
 
     dist = dist.squeeze()
@@ -114,7 +122,7 @@ def perc_0(dist):
     else:
         return (dist ==0).mean(axis = 1)
 
-def max(dist):
+def max_(dist):
 
     dist = dist.squeeze()
     if len(dist.shape)==1:
@@ -130,3 +138,6 @@ def percentile(dist, q = 99):
         return np.percentile(dist,q)
     else:
         return np.percentile(dist,q, axis = 1)
+
+
+
