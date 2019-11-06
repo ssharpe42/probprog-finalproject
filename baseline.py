@@ -108,7 +108,7 @@ class PoissReg:
         # This shouldn't be delta in this case like https://pyro.ai/examples/bayesian_regression.html#Inference
         # pyro.sample("prediction", dist.Delta(model(data, demand)))
         # We want a poisson output
-        pyro.sample("prediction", dist.Poisson(self.model(data, demand)))
+        pyro.sample("prediction", dist.Delta(self.model(data, demand)))
 
 
 if __name__ == '__main__':
