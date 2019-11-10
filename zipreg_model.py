@@ -80,36 +80,6 @@ class ZIPoissReg:
             # should we be returning lmbda?
             return gate, lmbda
         
-    def model2(self,data,demand):
-        coef = {}
-        
-        for s in self.features['station']['names']:
-            coef[s] = pyro.sample(s, dist.Normal(0,1))
-        
-        for s in self.features['hour']['names']:
-            coef[s] = pyro.sample(s, dist.Normal(0,1))
-            
-        log_lmbda1 = 0
-        for i in range(len(self.features['station']['names'])):
-            name = self.features['station']['names'][i]
-            index = self.features['station']['index'][i]
-            log_lmbda1 += coef[name] * data[:, index]
-            
-        log_lmbda2 = 0
-
-        for i in range(len(self.features['hour']['names'])):
-            name = self.features['hour']['names'][i]
-            index = self.features['hour']['index'][i]
-            log_lmbda2 += coef[name] * data[:, index]
-
-        log_lmbda = log_lmbda1*log_lmbda2
-        lmbda = log_lmbda.exp()
-        
-        with pyro.plate("data", len(data)):
-            y = pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
-
-            # should we be returning lmbda?
-            return lmbda
 
     def guide(self, data, demand):
         weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
@@ -120,6 +90,8 @@ class ZIPoissReg:
                                 constraint=constraints.positive)
         gate_beta = pyro.param('gate_beta', torch.tensor(3.),
                                constraint=constraints.positive)
+
+        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
 
         coef = {}
         log_lmbda = 0
@@ -144,40 +116,8 @@ class ZIPoissReg:
             log_lmbda += coef[name] * data[:, index]
 
         lmbda = log_lmbda.exp()
-        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
         
-        
-        
-    def guide2(self, data, demand):
-        weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
-        weights_scale = pyro.param('weights_scale', torch.ones(data.shape[1]),
-                                   constraint=constraints.positive)
 
-        coef = {}
-        log_lmbda1 = 0
-        for i in range(len(self.features['station']['names'])):
-            name = self.features['station']['names'][i]
-            index = self.features['station']['index'][i]
-
-            coef[name] = pyro.sample(name,
-                                     dist.Normal(weights_loc[index],
-                                                 weights_scale[index]))
-
-            log_lmbda1 += coef[name] * data[:, index]
-
-        log_lmbda2 = 0
-        for i in range(len(self.features['hour']['names'])):
-            name = self.features['hour']['names'][i]
-            index = self.features['hour']['index'][i]
-
-            coef[name] = pyro.sample(name,
-                                     dist.Normal(weights_loc[index],
-                                                 weights_scale[index]))
-
-            log_lmbda2 += coef[name] * data[:, index]
-
-        log_lmbda = log_lmbda1*log_lmbda2
-        lmbda = log_lmbda.exp()
 
     def wrapped_model(self, data, demand):
         # This shouldn't be delta in this case like

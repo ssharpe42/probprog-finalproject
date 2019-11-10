@@ -59,6 +59,63 @@ def get_demand(conn):
     return hourly_trips
 
 
+def get_demand_tmp(conn):
+    """Hourly trips per station"""
+
+    # Get all trips
+    trips = pd.read_sql_query("select * from trip;", con=conn)
+    station_info = pd.read_sql_query("select * from station;", con=conn)
+
+    # Convert to date
+    station_info['installation_date'] = pd.to_datetime(
+        station_info['installation_date'])
+    trips['start_date'] = pd.to_datetime(trips['start_date'])
+
+    # Convert to date and hour
+    # trips['date_hour'] = trips['start_date'].dt.floor('h')
+
+    # Convert to date and every 3 hour
+    trips['date_hour'] = trips['start_date'].dt.floor('h')
+
+    # Get all combinations of time and station
+    date_hours, start_stations, end_stations = cartesian_product([
+        pd.date_range(trips['date_hour'].min(),
+                      trips['date_hour'].max(), freq='3h'),
+        (trips['start_station_id'].unique(),trips['end_station_id'].unique())])
+
+    all_periods = pd.DataFrame(
+        {'date_hour': date_hours, 'start_station_id': start_stations, 
+        'end_station_id': end_stations})
+
+    # Keep station hour combo if it exists at that time
+    all_periods = all_periods.merge(
+        station_info[['id', 'installation_date']],
+        how='left',
+        left_on='start_station_id',
+        right_on='id'
+    ).query('installation_date<date_hour')
+
+    # Trips by station and hour
+    hourly_trips = (all_periods.merge(
+        trips.groupby(['start_station_id',
+                       'start_station_name',
+                       'end_station_id'
+                       'date_hour'])
+        .size()
+        .reset_index(name='demand'),
+        how='left', on=['date_hour', 'start_station_id'])
+        .fillna(0))
+
+    # Add time features
+    hourly_trips['month'] = hourly_trips['date_hour'].dt.month
+    hourly_trips['weekday'] = hourly_trips['date_hour'].dt.weekday
+    hourly_trips['hour'] = hourly_trips['date_hour'].dt.hour
+    hourly_trips['date'] = hourly_trips['date_hour'].dt.floor('d')
+
+    return hourly_trips
+
+
+
 def get_station_info(conn):
     """Station specific information"""
 
