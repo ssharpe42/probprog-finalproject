@@ -8,26 +8,28 @@ from criticism import *
 
 
 
-
 def main():
 
     with open('data/demand_sample.pickle', 'rb') as f:
         data_samp = pickle.load(f)
 
+    train_new = True
 
     #global features
     data, features = feature_generation(data_samp)
+
+
     #p = PoissReg(features, data)
     p = ZIPoissReg(features, data)
 
-    train_new = False
+
 
     if train_new:
         svi, elbo_loss = run_svi(p.model, p.guide,
                                  iters=5000,
                                  data=data['data'],
                                  demand=data['demand'],
-                                 filename='models/svi_zip_params.pkl')
+                                 filename='models/svi_zip_params_station_plus_hr.pkl')
 
         plot_elbo(elbo_loss)
 
