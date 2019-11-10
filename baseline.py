@@ -1,6 +1,3 @@
-import logging
-import os
-
 import numpy as np
 import pandas as pd
 import pyro
@@ -10,7 +7,6 @@ from torch.distributions import constraints
 
 
 def feature_generation(data):
-
     # Get station id dummies:
     station_onehot = pd.get_dummies(
         data['start_station_id']).add_prefix('station_')
@@ -40,7 +36,7 @@ def feature_generation(data):
 
     return data, feature_info
 
-# 2362.1897
+
 class PoissReg:
 
     def __init__(self, features, data):
@@ -70,15 +66,21 @@ class PoissReg:
         lmbda = log_lmbda.exp()
 
         with pyro.plate("data", len(data)):
-            y = pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
+            pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
 
-            # should we be returning lmbda?
             return lmbda
 
     def guide(self, data, demand):
-        weights_loc = pyro.param('weights_loc', torch.randn(data.shape[1]))
-        weights_scale = pyro.param('weights_scale', torch.ones(data.shape[1]),
-                                   constraint=constraints.positive)
+
+        n_stations = len(self.features['station']['names'])
+        station_w_loc = pyro.param('station_w_loc', torch.randn(n_stations))
+        station_w_scale = pyro.param('station_w_scale', torch.ones(n_stations),
+                                     constraint=constraints.positive)
+
+        n_hours = len(self.features['hour']['names'])
+        hour_w_loc = pyro.param('hour_w_loc', torch.randn(n_hours))
+        hour_w_scale = pyro.param('hour_w_scale', torch.ones(n_hours),
+                                  constraint=constraints.positive)
 
         coef = {}
         log_lmbda = 0
@@ -87,8 +89,8 @@ class PoissReg:
             index = self.features['station']['index'][i]
 
             coef[name] = pyro.sample(name,
-                                     dist.Normal(weights_loc[index],
-                                                 weights_scale[index]))
+                                     dist.Normal(station_w_loc[i],
+                                                 station_w_scale[i]))
 
             log_lmbda += coef[name] * data[:, index]
 
@@ -97,18 +99,16 @@ class PoissReg:
             index = self.features['hour']['index'][i]
 
             coef[name] = pyro.sample(name,
-                                     dist.Normal(weights_loc[index],
-                                                 weights_scale[index]))
+                                     dist.Normal(hour_w_loc[i],
+                                                 hour_w_scale[i]))
 
             log_lmbda += coef[name] * data[:, index]
 
         lmbda = log_lmbda.exp()
 
     def wrapped_model(self, data, demand):
-        # This shouldn't be delta in this case like https://pyro.ai/examples/bayesian_regression.html#Inference
-        # pyro.sample("prediction", dist.Delta(model(data, demand)))
-        # We want a poisson output
-        pyro.sample("prediction", dist.Delta(self.model(data, demand)))
+        # https://pyro.ai/examples/bayesian_regression.html#Inference
+        pyro.sample("lmbda_post", dist.Delta(self.model(data, demand)))
 
 
 if __name__ == '__main__':
@@ -120,4 +120,3 @@ if __name__ == '__main__':
     # samp = data1.groupby(['start_station_id','hour']).apply(lambda x: x.sample(300)).reset_index(drop = True)
     # with open('data/demand_sample.pickle','wb') as f:
     #     pickle.dump(samp, f)
-

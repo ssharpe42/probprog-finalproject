@@ -11,7 +11,6 @@ from torch.nn.functional import sigmoid
 
 
 def feature_generation(data):
-
     # Get station id dummies:
     station_onehot = pd.get_dummies(
         data['start_station_id']).add_prefix('station_')
@@ -55,7 +54,7 @@ class ZIPoissRegGate:
             coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
         for s in self.features['station']['names']:
-            s+='_gate'
+            s += '_gate'
             coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
         for s in self.features['hour']['names']:
@@ -67,7 +66,7 @@ class ZIPoissRegGate:
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
             log_lmbda += coef[name] * data[:, index]
-            gate_mean += coef[name+'_gate'] * data[:, index]
+            gate_mean += coef[name + '_gate'] * data[:, index]
 
         for i in range(len(self.features['hour']['names'])):
             name = self.features['hour']['names'][i]
@@ -89,17 +88,18 @@ class ZIPoissRegGate:
         n_stations = len(self.features['station']['names'])
         station_w_loc = pyro.param('station_w_loc', torch.randn(n_stations))
         station_w_scale = pyro.param('station_w_scale', torch.ones(n_stations),
-                                   constraint=constraints.positive)
+                                     constraint=constraints.positive)
 
-        station_gate_loc = pyro.param('station_gate_loc', torch.randn(n_stations))
-        station_gate_scale = pyro.param('station_gate_scale', torch.ones(n_stations),
-                                   constraint=constraints.positive)
-
+        station_gate_loc = pyro.param('station_gate_loc',
+                                      torch.randn(n_stations))
+        station_gate_scale = pyro.param('station_gate_scale',
+                                        torch.ones(n_stations),
+                                        constraint=constraints.positive)
 
         n_hours = len(self.features['hour']['names'])
         hour_w_loc = pyro.param('hour_w_loc', torch.randn(n_hours))
         hour_w_scale = pyro.param('hour_w_scale', torch.ones(n_hours),
-                                   constraint=constraints.positive)
+                                  constraint=constraints.positive)
 
         coef = {}
         log_lmbda = 0
@@ -112,12 +112,13 @@ class ZIPoissRegGate:
                                      dist.Normal(station_w_loc[i],
                                                  station_w_scale[i]))
 
-            coef[name+'_gate'] = pyro.sample(name+'_gate',
-                                     dist.Normal(station_gate_loc[i],
-                                                 station_gate_scale[i]))
+            coef[name + '_gate'] = pyro.sample(name + '_gate',
+                                               dist.Normal(station_gate_loc[i],
+                                                           station_gate_scale[
+                                                               i]))
 
             log_lmbda += coef[name] * data[:, index]
-            gate_mean += coef[name+'_gate'] * data[:, index]
+            gate_mean += coef[name + '_gate'] * data[:, index]
 
         for i in range(len(self.features['hour']['names'])):
             name = self.features['hour']['names'][i]
@@ -133,20 +134,15 @@ class ZIPoissRegGate:
         gate = sigmoid(gate_mean)
 
     def wrapped_model(self, data, demand):
-        # This shouldn't be delta in this case like
         # https://pyro.ai/examples/bayesian_regression.html#Inference
-        # pyro.sample("prediction", dist.Delta(model(data, demand)))
-        pyro.sample(
-            "prediction",
-            dist.ZeroInflatedPoisson(
-                *
-                self.model(
-                    data,
-                    demand)))
+        gate, lmbda = self.model(data, demand)
+        pyro.sample("gate_post", dist.Delta(gate))
+        pyro.sample("lmbda_post", dist.Delta(lmbda))
 
 
 if __name__ == '__main__':
     import pickle
+
     with open('data/demand_3h.pickle', 'rb') as f:
         data1 = pickle.load(f)
 

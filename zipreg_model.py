@@ -9,7 +9,6 @@ from torch.distributions import constraints
 
 
 def feature_generation(data):
-
     # Get station id dummies:
     station_onehot = pd.get_dummies(
         data['start_station_id']).add_prefix('station_')
@@ -68,8 +67,8 @@ class ZIPoissReg:
 
         lmbda = log_lmbda.exp()
 
-        gate_alpha = pyro.sample('gate_alpha_prior', dist.Gamma(2, .6))
-        gate_beta = pyro.sample('gate_beta_prior', dist.Gamma(3, .4))
+        gate_alpha = pyro.sample('gate_alpha', dist.Gamma(2, .6))
+        gate_beta = pyro.sample('gate_beta', dist.Gamma(3, .4))
         gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
 
         with pyro.plate("data", len(data)):
@@ -85,16 +84,16 @@ class ZIPoissReg:
         n_stations = len(self.features['station']['names'])
         station_w_loc = pyro.param('station_w_loc', torch.randn(n_stations))
         station_w_scale = pyro.param('station_w_scale', torch.ones(n_stations),
-                                   constraint=constraints.positive)
+                                     constraint=constraints.positive)
 
         n_hours = len(self.features['hour']['names'])
         hour_w_loc = pyro.param('hour_w_loc', torch.randn(n_hours))
         hour_w_scale = pyro.param('hour_w_scale', torch.ones(n_hours),
-                                   constraint=constraints.positive)
+                                  constraint=constraints.positive)
 
-        gate_alpha = pyro.param('gate_alpha', torch.tensor(3.),
+        gate_alpha_loc = pyro.param('gate_alpha_loc', torch.tensor(3.),
                                 constraint=constraints.positive)
-        gate_beta = pyro.param('gate_beta', torch.tensor(3.),
+        gate_beta_loc = pyro.param('gate_beta_loc', torch.tensor(3.),
                                constraint=constraints.positive)
 
         coef = {}
@@ -119,24 +118,24 @@ class ZIPoissReg:
 
             log_lmbda += coef[name] * data[:, index]
 
+        gate_alpha = pyro.sample('gate_alpha', dist.Normal(gate_alpha_loc,
+                                                           torch.tensor(0.05)))
+        gate_beta = pyro.sample('gate_beta', dist.Normal(gate_beta_loc,
+                                                           torch.tensor(0.05)))
+
         lmbda = log_lmbda.exp()
         gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
 
     def wrapped_model(self, data, demand):
-        # This shouldn't be delta in this case like
         # https://pyro.ai/examples/bayesian_regression.html#Inference
-        # pyro.sample("prediction", dist.Delta(model(data, demand)))
-        pyro.sample(
-            "prediction",
-            dist.ZeroInflatedPoisson(
-                *
-                self.model(
-                    data,
-                    demand)))
+        gate, lmbda = self.model(data, demand)
+        pyro.sample("gate_post", dist.Delta(gate))
+        pyro.sample("lmbda_post", dist.Delta(lmbda))
 
 
 if __name__ == '__main__':
     import pickle
+
     with open('data/demand_3h.pickle', 'rb') as f:
         data1 = pickle.load(f)
 
