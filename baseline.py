@@ -14,8 +14,13 @@ def feature_generation(data):
     # Get hour dummies
     hour_onehot = pd.get_dummies(data['hour']).add_prefix('hour_')
 
+    # Weekday
+    data['daytype'] = np.where(data['weekday'] < 5, 'weekday', 'weekend')
+    daytype_onehot = pd.get_dummies(data['daytype'])
+
     # Feature df
-    feature_df = pd.concat([station_onehot, hour_onehot], axis=1)
+    feature_df = pd.concat([station_onehot, hour_onehot, daytype_onehot],
+                           axis=1)
 
     data = {
         'demand': torch.tensor(
@@ -32,7 +37,11 @@ def feature_generation(data):
                     'hour': {'names': hour_onehot.columns.values,
                              'index': np.array([
                                  feature_df.columns.get_loc(c)
-                                 for c in hour_onehot.columns])}}
+                                 for c in hour_onehot.columns])},
+                    'daytype': {'names': daytype_onehot.columns.values,
+                                'index': np.array([
+                                    feature_df.columns.get_loc(c)
+                                    for c in daytype_onehot.columns])}}
 
     return data, feature_info
 
@@ -49,8 +58,10 @@ class PoissReg:
         for s in self.features['station']['names']:
             coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
-        for s in self.features['hour']['names']:
-            coef[s] = pyro.sample(s, dist.Normal(0, 1))
+        for h in self.features['hour']['names']:
+            for d in self.features['daytype']['names']:
+                name = h + '_' + d
+                coef[name] = pyro.sample(name, dist.Normal(0, 1))
 
         log_lmbda = 0
         for i in range(len(self.features['station']['names'])):
@@ -58,10 +69,14 @@ class PoissReg:
             index = self.features['station']['index'][i]
             log_lmbda += coef[name] * data[:, index]
 
-        for i in range(len(self.features['hour']['names'])):
-            name = self.features['hour']['names'][i]
-            index = self.features['hour']['index'][i]
-            log_lmbda += coef[name] * data[:, index]
+        for h in range(len(self.features['hour']['names'])):
+            for d in range(len(self.features['daytype']['names'])):
+                h_name = self.features['hour']['names'][h]
+                h_index = self.features['hour']['index'][h]
+                d_name = self.features['daytype']['names'][d]
+                d_index = self.features['daytype']['index'][d]
+                log_lmbda += coef[h_name + '_' + d_name] * \
+                             data[:, h_index] * data[:, d_index]
 
         lmbda = log_lmbda.exp()
 
@@ -78,8 +93,11 @@ class PoissReg:
                                      constraint=constraints.positive)
 
         n_hours = len(self.features['hour']['names'])
-        hour_w_loc = pyro.param('hour_w_loc', torch.randn(n_hours))
-        hour_w_scale = pyro.param('hour_w_scale', torch.ones(n_hours),
+        n_daytype = len(self.features['daytype']['names'])
+        hour_daytype_loc = pyro.param('hour_dattype_loc',
+                                torch.randn(n_hours * n_daytype))
+        hour_daytype_scale = pyro.param('hour_dattype_scale',
+                                  torch.ones(n_hours * n_daytype),
                                   constraint=constraints.positive)
 
         coef = {}
@@ -94,15 +112,24 @@ class PoissReg:
 
             log_lmbda += coef[name] * data[:, index]
 
-        for i in range(len(self.features['hour']['names'])):
-            name = self.features['hour']['names'][i]
-            index = self.features['hour']['index'][i]
 
-            coef[name] = pyro.sample(name,
-                                     dist.Normal(hour_w_loc[i],
-                                                 hour_w_scale[i]))
+        for h in range(len(self.features['hour']['names'])):
+            for d in range(len(self.features['daytype']['names'])):
+                h_name = self.features['hour']['names'][h]
+                h_index = self.features['hour']['index'][h]
+                d_name = self.features['daytype']['names'][d]
+                d_index = self.features['daytype']['index'][d]
 
-            log_lmbda += coef[name] * data[:, index]
+
+                name = h_name + '_' + d_name
+                i =  h*n_daytype + d
+                coef[name] = pyro.sample(name,
+                                         dist.Normal(hour_daytype_loc[i],
+                                                     hour_daytype_scale[i]))
+
+                log_lmbda += coef[h_name + '_' + d_name] * \
+                             data[:, h_index] * data[:, d_index]
+
 
         lmbda = log_lmbda.exp()
 
@@ -113,10 +140,3 @@ class PoissReg:
 
 if __name__ == '__main__':
     pass
-    # import pickle
-    # with open('data/demand_3h.pickle', 'rb') as f:
-    #     data1 = pickle.load(f)
-    #
-    # samp = data1.groupby(['start_station_id','hour']).apply(lambda x: x.sample(300)).reset_index(drop = True)
-    # with open('data/demand_sample.pickle','wb') as f:
-    #     pickle.dump(samp, f)
