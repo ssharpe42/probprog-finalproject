@@ -80,7 +80,7 @@ class ZIPoissReg:
                 d_name = self.features['daytype']['names'][d]
                 d_index = self.features['daytype']['index'][d]
                 log_lmbda += coef[h_name + '_' + d_name] * \
-                             data[:, h_index] * data[:, d_index]
+                    data[:, h_index] * data[:, d_index]
 
         lmbda = log_lmbda.exp()
 
@@ -106,16 +106,15 @@ class ZIPoissReg:
         n_hours = len(self.features['hour']['names'])
         n_daytype = len(self.features['daytype']['names'])
         hour_daytype_loc = pyro.param('hour_dattype_loc',
-                                torch.randn(n_hours * n_daytype))
+                                      torch.randn(n_hours * n_daytype))
         hour_daytype_scale = pyro.param('hour_dattype_scale',
-                                  torch.ones(n_hours * n_daytype),
-                                  constraint=constraints.positive)
-
+                                        torch.ones(n_hours * n_daytype),
+                                        constraint=constraints.positive)
 
         gate_alpha_loc = pyro.param('gate_alpha_loc', torch.tensor(3.),
-                                constraint=constraints.positive)
+                                    constraint=constraints.positive)
         gate_beta_loc = pyro.param('gate_beta_loc', torch.tensor(3.),
-                               constraint=constraints.positive)
+                                   constraint=constraints.positive)
 
         coef = {}
         log_lmbda = 0
@@ -129,7 +128,6 @@ class ZIPoissReg:
 
             log_lmbda += coef[name] * data[:, index]
 
-
         for h in range(len(self.features['hour']['names'])):
             for d in range(len(self.features['daytype']['names'])):
                 h_name = self.features['hour']['names'][h]
@@ -137,25 +135,22 @@ class ZIPoissReg:
                 d_name = self.features['daytype']['names'][d]
                 d_index = self.features['daytype']['index'][d]
 
-
                 name = h_name + '_' + d_name
-                i =  h*n_daytype + d
+                i = h * n_daytype + d
                 coef[name] = pyro.sample(name,
                                          dist.Normal(hour_daytype_loc[i],
                                                      hour_daytype_scale[i]))
 
                 log_lmbda += coef[h_name + '_' + d_name] * \
-                             data[:, h_index] * data[:, d_index]
-
+                    data[:, h_index] * data[:, d_index]
 
         gate_alpha = pyro.sample('gate_alpha', dist.Normal(gate_alpha_loc,
                                                            torch.tensor(0.05)))
         gate_beta = pyro.sample('gate_beta', dist.Normal(gate_beta_loc,
-                                                           torch.tensor(0.05)))
+                                                         torch.tensor(0.05)))
 
         lmbda = log_lmbda.exp()
         gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
-
 
     def wrapped_model(self, data, demand):
         # https://pyro.ai/examples/bayesian_regression.html#Inference
