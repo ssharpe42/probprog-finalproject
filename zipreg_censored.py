@@ -1,5 +1,4 @@
-# Poisson Regression
-# Rate Estimate: exp(station + hour*daytype)
+# Zero Inflated Poisson Regression
 
 import numpy as np
 import pandas as pd
@@ -21,8 +20,12 @@ def feature_generation(data):
     data['daytype'] = np.where(data['weekday'] < 5, 'weekday', 'weekend')
     daytype_onehot = pd.get_dummies(data['daytype'])
 
+    #Censored
+    censored = data[['censored']]
+
     # Feature df
-    feature_df = pd.concat([station_onehot, hour_onehot, daytype_onehot],
+    feature_df = pd.concat([station_onehot, hour_onehot,
+                            daytype_onehot, censored],
                            axis=1)
 
     data = {
@@ -44,12 +47,13 @@ def feature_generation(data):
                     'daytype': {'names': daytype_onehot.columns.values,
                                 'index': np.array([
                                     feature_df.columns.get_loc(c)
-                                    for c in daytype_onehot.columns])}}
+                                    for c in daytype_onehot.columns])},
+                    'censored': {'index': feature_df.columns.get_loc('censored')}}
 
     return data, feature_info
 
 
-class PoissReg:
+class ZIPoissReg:
 
     def __init__(self, features, data):
 
@@ -83,10 +87,23 @@ class PoissReg:
 
         lmbda = log_lmbda.exp()
 
-        with pyro.plate("data", len(data)):
-            pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
+        gate_alpha = pyro.sample('gate_alpha', dist.Gamma(2, 2))
+        gate_beta = pyro.sample('gate_beta', dist.Gamma(3, 2))
+        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
 
-            return lmbda
+        with pyro.plate("data", len(data)):
+
+            demand_dist = dist.ZeroInflatedPoisson(gate, lmbda)
+
+            with pyro.poutine.mask():
+
+
+            pyro.sample(
+                "obs", dist.ZeroInflatedPoisson(
+                    gate, lmbda), obs=demand)
+
+            # should we be returning lmbda?
+            return gate, lmbda
 
     def guide(self, data, demand):
 
@@ -102,6 +119,12 @@ class PoissReg:
         hour_daytype_scale = pyro.param('hour_dattype_scale',
                                   torch.ones(n_hours * n_daytype),
                                   constraint=constraints.positive)
+
+
+        gate_alpha_loc = pyro.param('gate_alpha_loc', torch.tensor(3.),
+                                constraint=constraints.positive)
+        gate_beta_loc = pyro.param('gate_beta_loc', torch.tensor(3.),
+                               constraint=constraints.positive)
 
         coef = {}
         log_lmbda = 0
@@ -134,12 +157,40 @@ class PoissReg:
                              data[:, h_index] * data[:, d_index]
 
 
+        gate_alpha = pyro.sample('gate_alpha', dist.Normal(gate_alpha_loc,
+                                                           torch.tensor(0.05)))
+        gate_beta = pyro.sample('gate_beta', dist.Normal(gate_beta_loc,
+                                                           torch.tensor(0.05)))
+
         lmbda = log_lmbda.exp()
+        gate = pyro.sample('gate', dist.Beta(gate_alpha, gate_beta))
+
 
     def wrapped_model(self, data, demand):
         # https://pyro.ai/examples/bayesian_regression.html#Inference
-        pyro.sample("lmbda_post", dist.Delta(self.model(data, demand)))
+        gate, lmbda = self.model(data, demand)
+        pyro.sample("gate_post", dist.Delta(gate))
+        pyro.sample("lmbda_post", dist.Delta(lmbda))
 
 
 if __name__ == '__main__':
     pass
+    # import pickle
+    #
+    # with open('data/demand_3h.pickle', 'rb') as f:
+    #     data1 = pickle.load(f)
+    #
+    # samp = data1.groupby(['start_station_id', 'hour']).apply(
+    #     lambda x: x.sample(100)).reset_index(drop=True)
+    # with open('data/demand_sample.pickle', 'wb') as f:
+    #     pickle.dump(samp, f)
+
+#https://eng.uber.com/modeling-censored-time-to-event-data-using-pyro/
+
+# def model(data):
+#     # sample f from the beta prior
+#     f = pyro.sample("latent_fairness", dist.Beta(alpha0, beta0))
+#     # loop over the observed data [WE ONLY CHANGE THE NEXT LINE]
+#     for i in pyro.plate("data_loop", len(data)):
+#         # observe datapoint i using the bernoulli likelihood
+#         pyro.sample("obs_{}".format(i), dist.Bernoulli(f), obs=data[i])
