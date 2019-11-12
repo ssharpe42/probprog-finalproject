@@ -77,6 +77,7 @@ class station_hr_ZIP_model:
         coef = {}
         count = 0
         log_lmbda = 0
+        
         for s1 in self.features['station']['names']:
             for s2 in self.features['hour']['names']:
                 s = s1+s2
