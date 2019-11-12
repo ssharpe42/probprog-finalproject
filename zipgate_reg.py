@@ -1,6 +1,6 @@
 # Zero Inflated Poisson Regression
 # Rate Estimate: exp(station + hour)
-# Gate Estimate: sigmoid(station)
+# Gate Estimate: sigmoid(station + hour)
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,7 @@ import pyro.distributions as dist
 import torch
 from torch.distributions import constraints
 from torch import sigmoid
+
 
 def feature_generation(data):
     # Get station id dummies:
@@ -68,6 +69,8 @@ class ZIPoissRegGate:
             for d in self.features['daytype']['names']:
                 name = h + '_' + d
                 coef[name] = pyro.sample(name, dist.Normal(0, 1))
+                name += '_gate'
+                coef[name] = pyro.sample(name, dist.Normal(0, 1))
 
         log_lmbda = 0
         gate_mean = 0
@@ -84,7 +87,10 @@ class ZIPoissRegGate:
                 d_name = self.features['daytype']['names'][d]
                 d_index = self.features['daytype']['index'][d]
                 log_lmbda += coef[h_name + '_' + d_name] * \
-                             data[:, h_index] * data[:, d_index]
+                    data[:, h_index] * data[:, d_index]
+
+                gate_mean += coef[h_name + '_' + d_name + '_gate'] * \
+                    data[:, h_index] * data[:, d_index]
 
         lmbda = log_lmbda.exp()
         gate = sigmoid(gate_mean)
@@ -112,10 +118,16 @@ class ZIPoissRegGate:
         n_hours = len(self.features['hour']['names'])
         n_daytype = len(self.features['daytype']['names'])
         hour_daytype_loc = pyro.param('hour_dattype_loc',
-                                torch.randn(n_hours * n_daytype))
+                                      torch.randn(n_hours * n_daytype))
         hour_daytype_scale = pyro.param('hour_dattype_scale',
-                                  torch.ones(n_hours * n_daytype),
-                                  constraint=constraints.positive)
+                                        torch.ones(n_hours * n_daytype),
+                                        constraint=constraints.positive)
+
+        hour_daytype_gate_loc = pyro.param('hour_dattype_gate_loc',
+                                           torch.randn(n_hours * n_daytype))
+        hour_daytype_gate_scale = pyro.param('hour_dattype_gate_scale',
+                                             torch.ones(n_hours * n_daytype),
+                                             constraint=constraints.positive)
 
         coef = {}
         log_lmbda = 0
@@ -143,15 +155,18 @@ class ZIPoissRegGate:
                 d_name = self.features['daytype']['names'][d]
                 d_index = self.features['daytype']['index'][d]
 
-
                 name = h_name + '_' + d_name
-                i =  h*n_daytype + d
+                i = h * n_daytype + d
                 coef[name] = pyro.sample(name,
                                          dist.Normal(hour_daytype_loc[i],
                                                      hour_daytype_scale[i]))
+                coef[name + '_gate'] = pyro.sample(name + '_gate', dist.Normal(
+                    hour_daytype_gate_loc[i], hour_daytype_gate_scale[i]))
 
                 log_lmbda += coef[h_name + '_' + d_name] * \
-                             data[:, h_index] * data[:, d_index]
+                    data[:, h_index] * data[:, d_index]
+                gate_mean += coef[h_name + '_' + d_name + '_gate'] * \
+                    data[:, h_index] * data[:, d_index]
 
         lmbda = log_lmbda.exp()
         gate = sigmoid(gate_mean)
@@ -164,12 +179,4 @@ class ZIPoissRegGate:
 
 
 if __name__ == '__main__':
-    import pickle
-
-    with open('data/demand_3h.pickle', 'rb') as f:
-        data1 = pickle.load(f)
-
-    samp = data1.groupby(['start_station_id', 'hour']).apply(
-        lambda x: x.sample(300)).reset_index(drop=True)
-    with open('data/demand_sample_weather.pickle', 'wb') as f:
-        pickle.dump(samp, f)
+    pass
