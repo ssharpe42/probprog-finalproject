@@ -14,20 +14,20 @@ data, features = feature_generation(data_samp)
 
 p = station_hr_ZIP_model(features, data)
 
-
-svi_posterior = get_svi_posterior(data['data'], data['demand'],
-                                model = p.model,
-                                guide = p.guide,
-                                filename='models/nihaar_model/svi_zip_params.pkl')
-
-
-post_samples = posterior_samples(
-    p.wrapped_model,
-    svi_posterior,
-    data,
-    ['obs','prediction'],
-    num_samples=80)
+svi, elbo_loss = run_svi(p.model, p.guide,
+                         iters=5000,
+                         data=data['data'],
+                         demand=data['demand'],
+                         filename='models/nihaar_model/svi_zip_params2.pkl')
 
 
-compare_test_statistic(data_samp.demand.values, post_samples[:,1,:],
-                       stat=perc_0)
+# post_samples = posterior_samples(
+#     p.wrapped_model,
+#     svi_posterior,
+#     data,
+#     ['obs','prediction'],
+#     num_samples=80)
+
+
+# compare_test_statistic(data_samp.demand.values, post_samples[:,1,:],
+#                        stat=perc_0)
