@@ -1,7 +1,7 @@
 import os
 import logging
 import pyro
-from pyro.infer import EmpiricalMarginal, SVI, JitTrace_ELBO, TracePredictive
+from pyro.infer import SVI, JitTrace_ELBO
 import pyro.optim as optim
 
 pyro.enable_validation(True)
@@ -10,12 +10,26 @@ pyro.set_rng_seed(1)
 logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 
+def ewma_step(current, new, alpha=.9):
+    """ Exponential moving avg visualizing loss"""
 
-def ewma_step(current, new, alpha = .9):
+    return current * (1 - alpha) + new * alpha
 
-    return current*(1-alpha) + new*alpha
 
-def run_svi(model, guide, iters, data, demand, num_samples = 100, filename = ''):
+def run_svi(model, guide, iters, data, demand, num_samples=1000, filename=''):
+    """
+    Runs SVI
+
+    :param model: pyro model
+    :param guide: pyro guide
+    :param iters: iterations
+    :param data: data to be passed to model, guide
+    :param demand: demand to be passed to model, guide
+    :param num_samples: number of samples for Monte Carlo posterior
+                        approximation
+    :param filename: file to save pyro param store (.pkl)
+    :return: svi object, and elbo loss
+    """
 
     pyro.clear_param_store()
     svi = SVI(model,
@@ -39,11 +53,23 @@ def run_svi(model, guide, iters, data, demand, num_samples = 100, filename = '')
     return svi, elbo_losses
 
 
+def get_svi_posterior(data, demand, svi=None, model=None,
+                      guide=None,
+                      num_samples=100,
+                      filename=''):
 
-def get_svi_posterior(data, demand, svi = None, model = None,
-        guide = None,
-        num_samples=100,
-        filename = ''):
+    """
+    Extract posterior
+
+    :param data: data to be passed to model, guide
+    :param demand: demand to be passed to model, guide
+    :param svi: svi object
+    :param model: pyro model
+    :param guide: pyro guide
+    :param num_samples: number of samples to generate
+    :param filename: param store to load
+    :return: posterior
+    """
 
     if svi is None and filename and model and guide:
         pyro.get_param_store().load(filename)
@@ -62,4 +88,3 @@ def get_svi_posterior(data, demand, svi = None, model = None,
         return svi
     else:
         raise ValueError('Provide svi object or model/guide and filename')
-

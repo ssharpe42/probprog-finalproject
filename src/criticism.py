@@ -1,42 +1,38 @@
 # Some code taken from
 # http://pyro.ai/examples/bayesian_regression.html#Model-Evaluation
-
-import numpy as np
-import pandas as pd
-from functools import partial
-import pyro
-from pyro.infer import EmpiricalMarginal, TracePredictive
+# https://pyro.ai/examples/bayesian_regression_ii.html?highlight=guide
+# https://pyro.ai/examples/bayesian_regression.html
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-
+from pyro.infer import EmpiricalMarginal, TracePredictive
 
 
 # SVI Posterior Functions
 
 def get_marginal(traces, sites):
-
     return (EmpiricalMarginal(traces, sites)
             ._get_samples_and_weights()[0]
             .detach().cpu().numpy())
 
 
-def posterior_samples(
+def ppd_samples(
         wrapped_model,
         svi_posterior,
         data,
         sites,
         num_samples=200):
     """
-    Get samples from posterior (or use site 'prediction'
-    for posterior predictive
+    Get samples from posterior predictive
 
     :param wrapped_model: wrapped model with prediction site
     :param svi_posterior: posterior from svi.run
     :param data: covariate features
     :param sites: list of sites to take marginal over
     :param num_samples: number of samples from posterior
-    :return: marginal over sites
+    :return: ppd
     """
     trace_pred = TracePredictive(wrapped_model,
                                  svi_posterior,
@@ -47,29 +43,49 @@ def posterior_samples(
     return marginal
 
 
-def site_summary(marginal, sites):
+def posterior_site_samples(
+        svi_posterior,
+        sites):
+    """
+    Get site samples from posterior
+
+    :param svi_posterior: posterior from svi.run
+    :param sites: list of sites to take marginal over
+    :return: marginal over sites
+    """
+    site_samples = {site: EmpiricalMarginal(svi_posterior,
+                                            sites=site)
+                    .enumerate_support().detach().cpu().numpy()
+                    for site in sites}
+
+    return site_samples
+
+
+def site_summary(samples, sites):
     """
     Summarize posterior latent samples
 
     :param samples: dict of marginal samples from posterior_samples
+    :param sites: sites to summarise
     :return: summary df
     """
 
     site_stats = {}
-    for i in range(marginal.shape[1]):
-        site_name = sites[i]
-        marginal_site = pd.DataFrame(marginal[:, i]).transpose()
-        describe = partial(pd.Series.describe,
-                           percentiles=[.05, 0.25, 0.5, 0.75, 0.95])
-        site_stats[site_name] = marginal_site.apply(
-            describe, axis=1)[["mean", "std", "5%", "25%", "50%", "75%", "95%"]]
-    return site_stats
+    for site_name in sites:
+        values = samples[site_name]
+        marginal_site = pd.DataFrame(values)
+        describe = marginal_site.describe(
+            percentiles=[.05, 0.25, 0.5, 0.75, 0.95]
+        ).transpose()
+        site_stats[site_name] = describe[[
+            "mean", "std", "5%", "25%", "50%", "75%", "95%"]]
 
+    return site_stats
 
 # MCMC Posterior Functions
 
-def mcmc_samples(mcmc):
 
+def mcmc_samples(mcmc):
     return {k: v.detach().cpu().numpy() for
             k, v in mcmc.get_samples().items()}
 
@@ -99,10 +115,11 @@ def compare_test_statistic(actual, predictive, stat=None, title='', **kwargs):
     actual_stat = stat(actual, **kwargs)
     pred_stat = stat(predictive, **kwargs)
 
-    sns.distplot(pred_stat, kde = False)
-    plt.axvline(actual_stat, 0,  pred_stat.max(), color = 'red')
+    sns.distplot(pred_stat, kde=False)
+    plt.axvline(actual_stat, 0, pred_stat.max(), color='red')
     plt.title(title)
     plt.show()
+
 
 # Test statistics over n samples of a distribution
 
@@ -114,35 +131,34 @@ def mean(dist):
     else:
         return dist.mean(axis=1)
 
-def perc_0(dist):
 
+def perc_0(dist):
     dist = dist.squeeze()
 
-    if len(dist.shape)==1:
-        return (dist==0).mean()
+    if len(dist.shape) == 1:
+        return (dist == 0).mean()
     else:
-        return (dist ==0).mean(axis = 1)
+        return (dist == 0).mean(axis=1)
+
 
 def max_(dist):
-
     dist = dist.squeeze()
-    if len(dist.shape)==1:
+    if len(dist.shape) == 1:
         return dist.max()
     else:
-        return dist.max(axis = 1)
+        return dist.max(axis=1)
 
-def percentile(dist, q = 99):
 
+def percentile(dist, q=99):
     dist = dist.squeeze()
 
-    if len(dist.shape)==1:
-        return np.percentile(dist,q)
+    if len(dist.shape) == 1:
+        return np.percentile(dist, q)
     else:
-        return np.percentile(dist,q, axis = 1)
+        return np.percentile(dist, q, axis=1)
 
 
 def align_regressors_ppd(df, post_samples):
-
     """
     Align regressors in data with posterior samples
 
@@ -151,14 +167,19 @@ def align_regressors_ppd(df, post_samples):
     :return: combined data
     """
     samples = pd.DataFrame(post_samples.T).add_prefix('sample_')
-    comb_data = (pd.concat([df, samples], axis = 1)
+    comb_data = (pd.concat([df, samples], axis=1)
                  .reset_index()
-                 .rename(columns = {'index':'samp_id'}))
+                 .rename(columns={'index': 'samp_id'}))
 
-    comb_data= (pd.melt(comb_data,
-                        id_vars=['samp_id', 'hour',
-                                 'weekday', 'start_station_id'],
-             value_vars=comb_data.filter(regex='sample_').columns.values)
-                )
+    comb_data = (
+        pd.melt(
+            comb_data,
+            id_vars=[
+                'samp_id',
+                'hour',
+                'weekday',
+                'start_station_id'],
+            value_vars=comb_data.filter(
+                regex='sample_').columns.values))
 
     return comb_data

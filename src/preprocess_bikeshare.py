@@ -46,11 +46,11 @@ def get_demand(conn):
         all_periods.merge(
             trips.groupby(['start_station_id',
                            'date_hour'])
-                .size()
-                .reset_index(name='demand'),
+            .size()
+            .reset_index(name='demand'),
             how='left',
             on=['date_hour', 'start_station_id'])
-            .fillna(0)
+        .fillna(0)
     )
 
     # Add time features
@@ -140,7 +140,7 @@ def create_model_obs(conn, weather=False):
 
         weather = weather[weather[['mean_temperature_f',
                                    'precipitation_inches']]
-            .notnull().all(axis=1)]
+                          .notnull().all(axis=1)]
 
         model_data = (model_data
                       .merge(weather,
