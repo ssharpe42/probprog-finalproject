@@ -1,0 +1,173 @@
+# Zero Inflated Poisson Regression
+# Rate Estimate: exp(station + hour)
+# Gate Estimate: sigmoid(station + hour)
+
+import numpy as np
+import pandas as pd
+import pyro
+import pyro.distributions as dist
+import torch
+from torch.distributions import constraints
+from torch import sigmoid
+
+
+def feature_generation(data):
+    # Get station id dummies:
+    station_onehot = pd.get_dummies(
+        data['start_station_id']).add_prefix('station_')
+
+    # Get hour dummies
+    hour_onehot = pd.get_dummies(data['hour']).add_prefix('hour_')
+
+    # Weekday
+    data['daytype'] = np.where(data['weekday'] < 5, 'weekday', 'weekend')
+    daytype_onehot = pd.get_dummies(data['daytype'])
+
+    # Feature df
+    feature_df = pd.concat([station_onehot, hour_onehot, daytype_onehot],
+                           axis=1)
+
+    data = {
+        'demand': torch.tensor(
+            data['demand'].values,
+            dtype=torch.float),
+        'data': torch.tensor(
+            feature_df.values,
+            dtype=torch.float)}
+
+    feature_info = {'station': {'names': station_onehot.columns.values,
+                                'index': np.array([
+                                    feature_df.columns.get_loc(c)
+                                    for c in station_onehot.columns])},
+                    'hour': {'names': hour_onehot.columns.values,
+                             'index': np.array([
+                                 feature_df.columns.get_loc(c)
+                                 for c in hour_onehot.columns])},
+                    'daytype': {'names': daytype_onehot.columns.values,
+                                'index': np.array([
+                                    feature_df.columns.get_loc(c)
+                                    for c in daytype_onehot.columns])}}
+
+    return data, feature_info
+
+
+class ZIPoissRegGate:
+
+    def __init__(self, features, data):
+
+        self.features = features
+
+    def model(self, data, demand):
+        coef = {}
+
+        # for s in self.features['station']['names']:
+        #     coef[s] = pyro.sample(s, dist.Normal(0, 1))
+        #     s += '_gate'
+        #     coef[s] = pyro.sample(s, dist.Normal(0, 1))
+
+        for s in self.features['station']['names']:
+            for h in self.features['hour']['names']:
+                for d in self.features['daytype']['names']:
+                    name = s+ '_' + h + '_' + d
+                    coef[name] = pyro.sample(name, dist.Normal(0, 1))
+                    name += '_gate'
+                    coef[name] = pyro.sample(name, dist.Normal(0, 1))
+
+        log_lmbda = 0
+        gate_mean = 0
+
+        for s in range(len(self.features['station']['names'])):
+            s_name = self.features['station']['names'][s]
+            s_index = self.features['station']['index'][s]
+
+            for h in range(len(self.features['hour']['names'])):
+                for d in range(len(self.features['daytype']['names'])):
+                    
+                    h_name = self.features['hour']['names'][h]
+                    h_index = self.features['hour']['index'][h]
+                    
+                    d_name = self.features['daytype']['names'][d]
+                    d_index = self.features['daytype']['index'][d]
+                    
+                    log_lmbda += coef[s_name+'_'+ h_name + '_' + d_name] *  \
+                    data[:, h_index] * data[:, d_index] * data[:, s_index]
+
+                    gate_mean += coef[s_name+'_'+ h_name + '_' + d_name + '_gate'] * \
+                        data[:, h_index] * data[:, d_index] * data[:, s_index]
+
+        lmbda = log_lmbda.exp()
+        gate = sigmoid(gate_mean)
+
+        with pyro.plate("data", len(data)):
+            pyro.sample(
+                "obs", dist.ZeroInflatedPoisson(
+                    gate, lmbda), obs=demand)
+
+            return gate, lmbda
+
+    def guide(self, data, demand):
+
+        n_stations = len(self.features['station']['names'])
+        n_hours = len(self.features['hour']['names'])
+        n_daytype = len(self.features['daytype']['names'])
+
+
+        station_hr_d_w_loc = pyro.param('station_hr_d_w_loc', torch.randn(n_stations*n_hours*n_daytype))
+        station_hr_d_w_scale = pyro.param('station_hr_d_w_scale', torch.ones(n_stations*n_hours*n_daytype),
+                                     constraint=constraints.positive)
+
+        station_hr_d_gate_loc = pyro.param('station_hr_d_gate_loc',
+                                      torch.randn(n_stations*n_hours*n_daytype))
+        station_hr_d_gate_scale = pyro.param('station_hr_d_gate_scale',
+                                        torch.ones(n_stations*n_hours*n_daytype),
+                                        constraint=constraints.positive)
+
+        coef = {}
+        log_lmbda = 0
+        gate_mean = 0
+        count = 0
+
+        for s in range(len(self.features['station']['names'])):
+            s_name = self.features['station']['names'][s]
+            s_index = self.features['station']['index'][s]
+
+            for h in range(len(self.features['hour']['names'])):
+                for d in range(len(self.features['daytype']['names'])):
+                    
+                    h_name = self.features['hour']['names'][h]
+                    h_index = self.features['hour']['index'][h]
+                    
+                    d_name = self.features['daytype']['names'][d]
+                    d_index = self.features['daytype']['index'][d]
+
+                    name = s_name + '_' + h_name + '_' + d_name
+
+                    coef[name] = pyro.sample(name,
+                                             dist.Normal(station_hr_d_w_loc[count],
+                                                         station_hr_d_w_scale[count]))
+
+                    coef[name + '_gate'] = pyro.sample(name + '_gate',
+                                                       dist.Normal(station_hr_d_gate_loc[count],
+                                                                   station_hr_d_gate_scale[
+                                                                       count]))
+                    
+                    log_lmbda += coef[name] *  \
+                    data[:, h_index] * data[:, d_index] * data[:, s_index]
+
+                    gate_mean += coef[name + '_gate'] * \
+                        data[:, h_index] * data[:, d_index] * data[:, s_index]
+
+                    count += 1  
+
+        lmbda = log_lmbda.exp()
+        gate = sigmoid(gate_mean)
+
+    def wrapped_model(self, data, demand):
+        # https://pyro.ai/examples/bayesian_regression.html#Inference
+        gate, lmbda = self.model(data, demand)
+        pyro.sample("gate_post", dist.Delta(gate))
+        pyro.sample("lmbda_post", dist.Delta(lmbda))
+
+
+if __name__ == '__main__':
+    pass
