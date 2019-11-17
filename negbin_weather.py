@@ -24,13 +24,17 @@ def feature_generation(data):
 
 
     # Get mean temperature 
-    mean_temp = data[['mean_temperature_f']]/120
+    mean_temp = data[['mean_temperature_f']]/120 # normalizing data with a constant 120 (hard coded here)
     mean_temp_squared = mean_temp**2
     constant_ones = np.ones(len(data['mean_temperature_f']))
     constant_ones = pd.DataFrame(data=constant_ones)
 
+    # Get precipitation as binary variable
+    data['precipitation_inches'] = np.where(data['precipitation_inches']=='0','dry','rainy')
+    precipitation_onehot = pd.get_dummies(data['precipitation_inches'])
+
     # Feature df
-    feature_df = pd.concat([station_onehot, hour_onehot, daytype_onehot, mean_temp, mean_temp_squared, constant_ones],
+    feature_df = pd.concat([station_onehot, hour_onehot, daytype_onehot, mean_temp, mean_temp_squared, constant_ones,precipitation_onehot],
                            axis=1)
 
     data = {
@@ -41,7 +45,7 @@ def feature_generation(data):
             feature_df.values,
             dtype=torch.float)}
     
-    i = feature_df.columns.get_loc(daytype_onehot.columns[-1])
+    i = feature_df.columns.get_loc(daytype_onehot.columns[-1]) #index of the daytype column
     
 
     feature_info = {'station': {'names': station_onehot.columns.values,
@@ -57,7 +61,9 @@ def feature_generation(data):
                                     feature_df.columns.get_loc(c)
                                     for c in daytype_onehot.columns])},
                     'temperature_f':{'names': np.array(['mean_temp','mean_temp_squared', 'ones']),
-                                     'index': np.array([i+1,i+2,i+3])}}
+                                     'index': np.array([i+1,i+2,i+3])},
+                    'precipitation_inches':{'names': precipitation_onehot.columns.values,
+                                     'index': np.array([i+4,i+5])}}
 
     return data, feature_info
 
@@ -83,6 +89,9 @@ class NegBinReg:
         coef['mean_temp_squared'] = pyro.sample('mean_temp_squared', dist.Normal(0, 1))
         coef['ones'] = pyro.sample('ones', dist.Normal(0, 1))
 
+        coef['dry'] = pyro.sample('dry', dist.Normal(0, 1))
+        coef['rainy'] = pyro.sample('rainy', dist.Normal(0, 1))
+
         logits = 0
         for i in range(len(self.features['station']['names'])):
             name = self.features['station']['names'][i]
@@ -98,23 +107,15 @@ class NegBinReg:
                 logits += coef[h_name + '_' + d_name] * \
                     data[:, h_index] * data[:, d_index]
 
-        logits += coef['mean_temp'] * data[:,-3] # linear term
-        logits += coef['mean_temp_squared'] * data[:,-2] # quadratic term
-        logits += coef['ones'] * data[:,-1] #constant
+        logits += coef['mean_temp'] * data[:,-5] # linear term
+        logits += coef['mean_temp_squared'] * data[:,-4] # quadratic term
+        logits += coef['ones'] * data[:,-3] #constant
 
-        eps = 0.01
+        logits += coef['dry'] * data[:,-2] # beta for dry days
+        logits += coef['rainy'] * data[:,-1] # beta for rainy days 
+
         prob = sigmoid(logits) 
         p = prob.clone()
-
-        # for i in range(len(p)):
-        #     if prob[i] ==1:
-        #         p[i]= prob[i]-eps
-
-        # for i in range(len(p)):
-        #     if prob[i] ==0:
-        #         p[i]= prob[i]+eps
-
-        print("probs are",p)
 
         total_count = pyro.sample('total_count', dist.Gamma(1, 1))
 
@@ -144,6 +145,11 @@ class NegBinReg:
         temp_loc = pyro.param('temp_loc', torch.randn(n_temp))
         temp_scale = pyro.param('temp_scale',torch.ones(n_temp),
                                 constraint=constraints.positive)
+
+        n_prec = len(self.features['precipitation_inches']['names'])
+        prec_loc = pyro.param('prec_loc', torch.randn(n_prec))
+        prec_scale = pyro.param('prec_scale',torch.ones(n_prec),
+                                constraint=constraints.positive) 
 
         total_count_loc = pyro.param('total_count_loc', torch.tensor(5.),
                                     constraint=constraints.positive)
@@ -178,7 +184,7 @@ class NegBinReg:
 
         for i in range(len(self.features['temperature_f']['names'])):
             name = self.features['temperature_f']['names'][i] # mean_temp, mean_temp_squared, ones
-            print(name)
+
             index = self.features['temperature_f']['index'][i] # used to index data
 
             coef[name] = pyro.sample(name,
@@ -186,12 +192,22 @@ class NegBinReg:
                                                  temp_scale[i]))
             logits += coef[name] * data[:, index]
 
+        for i in range(len(self.features['precipitation_inches']['names'])):
+            name = self.features['precipitation_inches']['names'][i] # mean_temp, mean_temp_squared, ones
+
+            index = self.features['temperature_f']['index'][i] # used to index data
+
+            coef[name] = pyro.sample(name,
+                                     dist.Normal(prec_loc[i],
+                                                 prec_scale[i]))
+            logits += coef[name] * data[:, index]    
+
+
         total_count = pyro.sample('total_count', dist.Normal(total_count_loc,
                                                            torch.tensor(0.5)))
         
         prob = sigmoid(logits) 
 
-        print("guide prob is",prob)
         return total_count, prob
 
     def wrapped_model(self, data, demand):
