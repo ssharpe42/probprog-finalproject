@@ -44,7 +44,7 @@ def run_svi(model, guide, iters, data, demand, num_samples=1000, filename=''):
     for i in range(num_iters):
         elbo = svi.step(data, demand)
         elbo_losses.append(elbo)
-        if i % 500 == 0:
+        if i % 1000 == 0:
             logging.info("Elbo loss: {}".format(elbo))
 
     if filename:

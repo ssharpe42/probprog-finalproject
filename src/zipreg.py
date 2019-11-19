@@ -1,6 +1,6 @@
 # Zero Inflated Poisson Regression
-# Rate Estimate: exp(station + hour*daytype)
-# Gate Estimate: global Beta
+# Rate Estimate: lambda = exp(station + hour*daytype)
+# Gate Estimate: rho ~ global Beta
 
 import numpy as np
 import pandas as pd

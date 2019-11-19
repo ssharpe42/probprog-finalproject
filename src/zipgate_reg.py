@@ -1,6 +1,6 @@
 # Zero Inflated Poisson Regression
-# Rate Estimate: exp(station + hour)
-# Gate Estimate: sigmoid(station + hour)
+# Rate Estimate: lambda = exp(station + hour)
+# Gate Estimate: rho = sigmoid(station + hour)
 
 import numpy as np
 import pandas as pd

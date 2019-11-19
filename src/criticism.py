@@ -55,7 +55,7 @@ def posterior_site_samples(
     """
     site_samples = {site: EmpiricalMarginal(svi_posterior,
                                             sites=site)
-                    .enumerate_support().detach().cpu().numpy()
+        .enumerate_support().detach().cpu().numpy()
                     for site in sites}
 
     return site_samples
@@ -81,6 +81,7 @@ def site_summary(samples, sites):
             "mean", "std", "5%", "25%", "50%", "75%", "95%"]]
 
     return site_stats
+
 
 # MCMC Posterior Functions
 
@@ -158,6 +159,15 @@ def percentile(dist, q=99):
         return np.percentile(dist, q, axis=1)
 
 
+def var(dist):
+    dist = dist.squeeze()
+
+    if len(dist.shape) == 1:
+        return np.var(dist)
+    else:
+        return np.var(dist,  axis=1)
+
+
 def align_regressors_ppd(df, post_samples):
     """
     Align regressors in data with posterior samples
@@ -166,7 +176,8 @@ def align_regressors_ppd(df, post_samples):
     :param post_samples: posterior samples
     :return: combined data
     """
-    samples = pd.DataFrame(post_samples.T).add_prefix('sample_')
+    samples = pd.DataFrame(data = post_samples.T,
+                           index = df.index).add_prefix('sample_')
     comb_data = (pd.concat([df, samples], axis=1)
                  .reset_index()
                  .rename(columns={'index': 'samp_id'}))
@@ -183,3 +194,21 @@ def align_regressors_ppd(df, post_samples):
                 regex='sample_').columns.values))
 
     return comb_data
+
+
+def stat_by_station(actual_df, ppd_df, stat=None, **kwargs):
+    actual = (actual_df
+             .groupby('start_station_id')
+             [['demand']]
+             .apply(lambda x: stat(x, **kwargs))
+             ).to_frame('demand')
+    ppd = (ppd_df
+             .groupby('start_station_id')
+             [['value']]
+             .apply(lambda x: stat(x, **kwargs))
+             ).to_frame('value')
+
+    compare = (actual.join(ppd)
+               .assign(diff = lambda x: np.abs(x['value']-x['demand'])))
+
+    return compare
