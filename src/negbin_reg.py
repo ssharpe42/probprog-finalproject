@@ -1,5 +1,6 @@
-# Poisson Regression
-# Rate Estimate: lambda = exp(station + hour*daytype)
+# Negative binomial regression
+# Estimate p: sigmoid(station + hour*daytype)
+# Estimate r: exp(station + hour*daytype)
 
 import numpy as np
 import pandas as pd
@@ -7,6 +8,7 @@ import pyro
 import pyro.distributions as dist
 import torch
 from torch.distributions import constraints
+from torch import sigmoid
 
 
 def feature_generation(data):
@@ -49,7 +51,7 @@ def feature_generation(data):
     return data, feature_info
 
 
-class PoissReg:
+class NegBinReg:
 
     def __init__(self, features, data):
 
@@ -60,17 +62,23 @@ class PoissReg:
 
         for s in self.features['station']['names']:
             coef[s] = pyro.sample(s, dist.Normal(0, 1))
+            s += '_count'
+            coef[s] = pyro.sample(s, dist.Normal(0, 1))
 
         for h in self.features['hour']['names']:
             for d in self.features['daytype']['names']:
                 name = h + '_' + d
                 coef[name] = pyro.sample(name, dist.Normal(0, 1))
+                name += '_count'
+                coef[name] = pyro.sample(name, dist.Normal(0, 1))
 
-        log_lmbda = 0
+        logits = 0
+        count_mean = 0
         for i in range(len(self.features['station']['names'])):
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
-            log_lmbda += coef[name] * data[:, index]
+            logits += coef[name] * data[:, index]
+            count_mean += coef[name + '_count'] * data[:, index]
 
         for h in range(len(self.features['hour']['names'])):
             for d in range(len(self.features['daytype']['names'])):
@@ -78,15 +86,20 @@ class PoissReg:
                 h_index = self.features['hour']['index'][h]
                 d_name = self.features['daytype']['names'][d]
                 d_index = self.features['daytype']['index'][d]
-                log_lmbda += coef[h_name + '_' + d_name] * \
+                logits += coef[h_name + '_' + d_name] * \
+                    data[:, h_index] * data[:, d_index]
+                count_mean += coef[h_name + '_' + d_name + '_count'] * \
                     data[:, h_index] * data[:, d_index]
 
-        lmbda = log_lmbda.exp()
+        prob = sigmoid(logits)
+        total_count = count_mean.exp()
 
         with pyro.plate("data", len(data)):
-            pyro.sample("obs", dist.Poisson(lmbda), obs=demand)
+            pyro.sample(
+                "obs", dist.NegativeBinomial(
+                    total_count, prob), obs=demand)
 
-            return lmbda
+            return total_count, prob
 
     def guide(self, data, demand):
 
@@ -94,6 +107,12 @@ class PoissReg:
         station_w_loc = pyro.param('station_w_loc', torch.randn(n_stations))
         station_w_scale = pyro.param('station_w_scale', torch.ones(n_stations),
                                      constraint=constraints.positive)
+
+        station_count_loc = pyro.param('station_count_loc',
+                                       torch.randn(n_stations))
+        station_count_scale = pyro.param('station_count_scale',
+                                         torch.ones(n_stations),
+                                         constraint=constraints.positive)
 
         n_hours = len(self.features['hour']['names'])
         n_daytype = len(self.features['daytype']['names'])
@@ -103,8 +122,15 @@ class PoissReg:
                                         torch.ones(n_hours * n_daytype),
                                         constraint=constraints.positive)
 
+        hour_daytype_count_loc = pyro.param('hour_dattype_count_loc',
+                                            torch.randn(n_hours * n_daytype))
+        hour_daytype_count_scale = pyro.param('hour_dattype_count_scale',
+                                              torch.ones(n_hours * n_daytype),
+                                              constraint=constraints.positive)
+
         coef = {}
-        log_lmbda = 0
+        logits = 0
+        count_mean = 0
         for i in range(len(self.features['station']['names'])):
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
@@ -113,7 +139,13 @@ class PoissReg:
                                      dist.Normal(station_w_loc[i],
                                                  station_w_scale[i]))
 
-            log_lmbda += coef[name] * data[:, index]
+            coef[name + '_count'] = pyro.sample(
+                name + '_count',
+                dist.Normal(station_count_loc[i],
+                            station_count_scale[i]))
+
+            logits += coef[name] * data[:, index]
+            count_mean += coef[name + '_count'] * data[:, index]
 
         for h in range(len(self.features['hour']['names'])):
             for d in range(len(self.features['daytype']['names'])):
@@ -128,13 +160,24 @@ class PoissReg:
                                          dist.Normal(hour_daytype_loc[i],
                                                      hour_daytype_scale[i]))
 
-                log_lmbda += coef[h_name + '_' + d_name] * \
+                coef[name + '_count'] = pyro.sample(
+                    name + '_count',
+                    dist.Normal(
+                        hour_daytype_count_loc[i],
+                        hour_daytype_count_scale[i]))
+
+                logits += coef[h_name + '_' + d_name] * \
+                    data[:, h_index] * data[:, d_index]
+                count_mean += coef[h_name + '_' + d_name + '_count'] * \
                     data[:, h_index] * data[:, d_index]
 
-        lmbda = log_lmbda.exp()
+        prob = sigmoid(logits)
+        total_count = count_mean.exp()
 
-        return lmbda
+        return total_count, prob
 
     def wrapped_model(self, data, demand):
-        # https://pyro.ai/examples/bayesian_regression.html#Inference
-        pyro.sample("lmbda_post", dist.Delta(self.model(data, demand)))
+
+        total_count, prob = self.model(data, demand)
+        pyro.sample("total_count_post", dist.Delta(total_count))
+        pyro.sample("prob_post", dist.Delta(prob))

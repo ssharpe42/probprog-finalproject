@@ -138,6 +138,9 @@ def create_model_obs(conn, weather=False):
                                  'mean_temperature_f',
                                  'precipitation_inches']]
 
+        weather['precipitation_inches'] = pd.to_numeric(
+            weather.precipitation_inches, errors='coerce')
+
         weather = weather[weather[['mean_temperature_f',
                                    'precipitation_inches']]
                           .notnull().all(axis=1)]
