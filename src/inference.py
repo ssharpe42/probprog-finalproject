@@ -57,7 +57,6 @@ def get_svi_posterior(data, demand, svi=None, model=None,
                       guide=None,
                       num_samples=100,
                       filename=''):
-
     """
     Extract posterior
 

@@ -10,7 +10,22 @@ import seaborn as sns
 from pyro.infer import EmpiricalMarginal, TracePredictive
 
 
+large = 16
+med = 14
+small = 12
+params = {'axes.titlesize': large,
+          'legend.fontsize': med,
+          'figure.figsize': (16, 10),
+          'axes.labelsize': med,
+          'xtick.labelsize': med,
+          'ytick.labelsize': med,
+          'figure.titlesize': large}
+plt.rcParams.update(params)
+plt.style.use('seaborn-whitegrid')
+sns.set_style("white")
+
 # SVI Posterior Functions
+
 
 def get_marginal(traces, sites):
     return (EmpiricalMarginal(traces, sites)
@@ -55,7 +70,7 @@ def posterior_site_samples(
     """
     site_samples = {site: EmpiricalMarginal(svi_posterior,
                                             sites=site)
-        .enumerate_support().detach().cpu().numpy()
+                    .enumerate_support().detach().cpu().numpy()
                     for site in sites}
 
     return site_samples
@@ -84,15 +99,12 @@ def site_summary(samples, sites):
 
 
 # MCMC Posterior Functions
-
-
 def mcmc_samples(mcmc):
     return {k: v.detach().cpu().numpy() for
             k, v in mcmc.get_samples().items()}
 
 
 # Plotting Functions
-
 def plot_elbo(elbo_losses):
     """Plot elbo loss"""
 
@@ -165,7 +177,7 @@ def var(dist):
     if len(dist.shape) == 1:
         return np.var(dist)
     else:
-        return np.var(dist,  axis=1)
+        return np.var(dist, axis=1)
 
 
 def align_regressors_ppd(df, post_samples):
@@ -176,8 +188,8 @@ def align_regressors_ppd(df, post_samples):
     :param post_samples: posterior samples
     :return: combined data
     """
-    samples = pd.DataFrame(data = post_samples.T,
-                           index = df.index).add_prefix('sample_')
+    samples = pd.DataFrame(data=post_samples.T,
+                           index=df.index).add_prefix('sample_')
     comb_data = (pd.concat([df, samples], axis=1)
                  .reset_index()
                  .rename(columns={'index': 'samp_id'}))
@@ -198,17 +210,17 @@ def align_regressors_ppd(df, post_samples):
 
 def stat_by_station(actual_df, ppd_df, stat=None, **kwargs):
     actual = (actual_df
-             .groupby('start_station_id')
-             [['demand']]
-             .apply(lambda x: stat(x, **kwargs))
-             ).to_frame('demand')
+              .groupby('start_station_id')
+              [['demand']]
+              .apply(lambda x: stat(x, **kwargs))
+              ).to_frame('demand')
     ppd = (ppd_df
-             .groupby('start_station_id')
-             [['value']]
-             .apply(lambda x: stat(x, **kwargs))
-             ).to_frame('value')
+           .groupby('start_station_id')
+           [['value']]
+           .apply(lambda x: stat(x, **kwargs))
+           ).to_frame('value')
 
     compare = (actual.join(ppd)
-               .assign(diff = lambda x: np.abs(x['value']-x['demand'])))
+               .assign(diff=lambda x: np.abs(x['value'] - x['demand'])))
 
     return compare

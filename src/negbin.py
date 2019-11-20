@@ -1,6 +1,6 @@
-# Zero Inflated Poisson Regression
-# Rate Estimate: exp(station + hour*daytype)
-# Gate Estimate: global Beta
+# Negative binomial regression
+# Estimate p: sigmoid(station + hour*daytype )
+# Estimate r: global gamma
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,7 @@ import pyro.distributions as dist
 import torch
 from torch.distributions import constraints
 from torch import sigmoid
+
 
 def feature_generation(data):
     # Get station id dummies:
@@ -88,7 +89,7 @@ class NegBinReg:
 
         with pyro.plate("data", len(data)):
             pyro.sample(
-                "obs", dist.NegativeBinomial (
+                "obs", dist.NegativeBinomial(
                     total_count, prob), obs=demand)
 
             return total_count, prob
@@ -109,7 +110,7 @@ class NegBinReg:
                                         constraint=constraints.positive)
 
         total_count_loc = pyro.param('total_count_loc', torch.tensor(5.),
-                                    constraint=constraints.positive)
+                                     constraint=constraints.positive)
 
         coef = {}
         logits = 0
@@ -139,8 +140,9 @@ class NegBinReg:
                 logits += coef[h_name + '_' + d_name] * \
                     data[:, h_index] * data[:, d_index]
 
-        total_count = pyro.sample('total_count', dist.Normal(total_count_loc,
-                                                           torch.tensor(0.25)))
+        total_count = pyro.sample(
+            'total_count', dist.Normal(
+                total_count_loc, torch.tensor(0.25)))
         prob = sigmoid(logits)
 
         return total_count, prob

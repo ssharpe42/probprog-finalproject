@@ -138,6 +138,3 @@ class PoissReg:
     def wrapped_model(self, data, demand):
         # https://pyro.ai/examples/bayesian_regression.html#Inference
         pyro.sample("lmbda_post", dist.Delta(self.model(data, demand)))
-
-
-
