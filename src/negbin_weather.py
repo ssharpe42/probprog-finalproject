@@ -1,6 +1,6 @@
 # Negative binomial regression
-# Estimate: exp(station + hour*daytype)
-# Estimate: global Beta
+# Estimate p: sigmoid(station + hour*daytype + temp + precip)
+# Estimate r: global gamma
 
 import numpy as np
 import pandas as pd
@@ -32,14 +32,14 @@ def feature_generation(data):
     #                              columns=['intercept'],
     #                              index=mean_temp.index)
     # Get precipitation as binary variable
-    data['precip'] = np.where(data['precipitation_inches']==0,
-                 'dry','rainy')
+    data['precip'] = np.where(data['precipitation_inches'] == 0,
+                              'dry', 'rainy')
     precipitation_onehot = pd.get_dummies(data['precip'])
 
     # Feature df
     feature_df = pd.concat(
         [station_onehot, hour_onehot, daytype_onehot, mean_temp,
-         mean_temp_squared,  precipitation_onehot],
+         mean_temp_squared, precipitation_onehot],
         axis=1)
 
     data = {
@@ -98,7 +98,6 @@ class NegBinReg:
         coef['mean_temp'] = pyro.sample('mean_temp', dist.Normal(0, 1))
         coef['mean_temp_squared'] = pyro.sample('mean_temp_squared',
                                                 dist.Normal(0, 1))
-        #coef['ones'] = pyro.sample('ones', dist.Normal(0, 1))
 
         coef['dry'] = pyro.sample('dry', dist.Normal(0, 1))
         coef['rainy'] = pyro.sample('rainy', dist.Normal(0, 1))
@@ -116,14 +115,10 @@ class NegBinReg:
                 d_name = self.features['daytype']['names'][d]
                 d_index = self.features['daytype']['index'][d]
                 logits += coef[h_name + '_' + d_name] * \
-                          data[:, h_index] * data[:, d_index]
+                    data[:, h_index] * data[:, d_index]
 
         logits += coef['mean_temp'] * data[:, -4]  # linear term
         logits += coef['mean_temp_squared'] * data[:, -3]  # quadratic term
-        #logits += coef['ones'] * data[:, -3]  # constant
-
-        #logits += coef['dry'] * data[:,-2] # beta for dry days
-        #logits += coef['rainy'] * data[:,-1] # beta for rainy days
 
         prob = sigmoid(logits)
         p = prob.clone()
@@ -191,7 +186,7 @@ class NegBinReg:
                                                      hour_daytype_scale[i]))
 
                 logits += coef[h_name + '_' + d_name] * \
-                          data[:, h_index] * data[:, d_index]
+                    data[:, h_index] * data[:, d_index]
 
         for i in range(len(self.features['temperature_f']['names'])):
             # mean_temp, mean_temp_squared, ones

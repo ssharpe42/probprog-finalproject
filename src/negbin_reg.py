@@ -1,6 +1,6 @@
-# Zero Inflated Poisson Regression
-# Rate Estimate: exp(station + hour*daytype)
-# Gate Estimate: global Beta
+# Negative binomial regression
+# Estimate p: sigmoid(station + hour*daytype)
+# Estimate r: exp(station + hour*daytype)
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,7 @@ import pyro.distributions as dist
 import torch
 from torch.distributions import constraints
 from torch import sigmoid
+
 
 def feature_generation(data):
     # Get station id dummies:
@@ -68,7 +69,7 @@ class NegBinReg:
             for d in self.features['daytype']['names']:
                 name = h + '_' + d
                 coef[name] = pyro.sample(name, dist.Normal(0, 1))
-                name+='_count'
+                name += '_count'
                 coef[name] = pyro.sample(name, dist.Normal(0, 1))
 
         logits = 0
@@ -77,7 +78,7 @@ class NegBinReg:
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
             logits += coef[name] * data[:, index]
-            count_mean+=coef[name+'_count'] * data[:, index]
+            count_mean += coef[name + '_count'] * data[:, index]
 
         for h in range(len(self.features['hour']['names'])):
             for d in range(len(self.features['daytype']['names'])):
@@ -95,7 +96,7 @@ class NegBinReg:
 
         with pyro.plate("data", len(data)):
             pyro.sample(
-                "obs", dist.NegativeBinomial (
+                "obs", dist.NegativeBinomial(
                     total_count, prob), obs=demand)
 
             return total_count, prob
@@ -108,10 +109,10 @@ class NegBinReg:
                                      constraint=constraints.positive)
 
         station_count_loc = pyro.param('station_count_loc',
-                                      torch.randn(n_stations))
+                                       torch.randn(n_stations))
         station_count_scale = pyro.param('station_count_scale',
-                                        torch.ones(n_stations),
-                                        constraint=constraints.positive)
+                                         torch.ones(n_stations),
+                                         constraint=constraints.positive)
 
         n_hours = len(self.features['hour']['names'])
         n_daytype = len(self.features['daytype']['names'])
@@ -122,14 +123,14 @@ class NegBinReg:
                                         constraint=constraints.positive)
 
         hour_daytype_count_loc = pyro.param('hour_dattype_count_loc',
-                                           torch.randn(n_hours * n_daytype))
+                                            torch.randn(n_hours * n_daytype))
         hour_daytype_count_scale = pyro.param('hour_dattype_count_scale',
-                                             torch.ones(n_hours * n_daytype),
-                                             constraint=constraints.positive)
+                                              torch.ones(n_hours * n_daytype),
+                                              constraint=constraints.positive)
 
         coef = {}
         logits = 0
-        count_mean=0
+        count_mean = 0
         for i in range(len(self.features['station']['names'])):
             name = self.features['station']['names'][i]
             index = self.features['station']['index'][i]
@@ -138,10 +139,10 @@ class NegBinReg:
                                      dist.Normal(station_w_loc[i],
                                                  station_w_scale[i]))
 
-            coef[name + '_count'] = pyro.sample(name + '_count',
-                                               dist.Normal(station_count_loc[i],
-                                                           station_count_scale[
-                                                               i]))
+            coef[name + '_count'] = pyro.sample(
+                name + '_count',
+                dist.Normal(station_count_loc[i],
+                            station_count_scale[i]))
 
             logits += coef[name] * data[:, index]
             count_mean += coef[name + '_count'] * data[:, index]
@@ -159,15 +160,16 @@ class NegBinReg:
                                          dist.Normal(hour_daytype_loc[i],
                                                      hour_daytype_scale[i]))
 
-                coef[name+ '_count'] = pyro.sample(name+ '_count',
-                                         dist.Normal(hour_daytype_count_loc[i],
-                                                    hour_daytype_count_scale[i]))
+                coef[name + '_count'] = pyro.sample(
+                    name + '_count',
+                    dist.Normal(
+                        hour_daytype_count_loc[i],
+                        hour_daytype_count_scale[i]))
 
                 logits += coef[h_name + '_' + d_name] * \
                     data[:, h_index] * data[:, d_index]
-                count_mean += coef[h_name + '_' + d_name+ '_count'] * \
+                count_mean += coef[h_name + '_' + d_name + '_count'] * \
                     data[:, h_index] * data[:, d_index]
-
 
         prob = sigmoid(logits)
         total_count = count_mean.exp()
@@ -179,5 +181,3 @@ class NegBinReg:
         total_count, prob = self.model(data, demand)
         pyro.sample("total_count_post", dist.Delta(total_count))
         pyro.sample("prob_post", dist.Delta(prob))
-
-
